@@ -38,7 +38,7 @@ MAX_DOC_CHARS = 2_000_000
 EXTRACT_TIMEOUT = 120  # seconds
 
 DEVICE = DeviceProps(
-    os="MLTeam WhatsApp Groups Reader (read-only)",  # shown in WhatsApp > Linked devices
+    os="MLTeam WhatsApp Chats Reader (read-only)",  # shown in WhatsApp > Linked devices
     platformType=DeviceProps.SAFARI,
     requireFullSync=True,
     historySyncConfig=DeviceProps.HistorySyncConfig(fullSyncDaysLimit=HISTORY_DAYS),

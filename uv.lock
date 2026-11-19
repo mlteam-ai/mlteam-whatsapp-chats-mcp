@@ -529,7 +529,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mlteam-whatsapp-groups-mcp"
+name = "mlteam-whatsapp-chats-mcp"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

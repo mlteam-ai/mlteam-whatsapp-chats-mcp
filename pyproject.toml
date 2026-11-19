@@ -1,5 +1,5 @@
 [project]
-name = "mlteam-whatsapp-groups-mcp"
+name = "mlteam-whatsapp-chats-mcp"
 version = "0.1.0"
 description = "Read-only MCP server that lets Claude answer questions from WhatsApp groups you choose"
 requires-python = ">=3.12"

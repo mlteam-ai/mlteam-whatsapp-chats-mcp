@@ -27,8 +27,8 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
 
 1. Clone and enter the repo:
    ```bash
-   git clone https://github.com/mlteam-ai/mlteam-whatsapp-groups-mcp.git
-   cd mlteam-whatsapp-groups-mcp
+   git clone https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp.git
+   cd mlteam-whatsapp-chats-mcp
    ```
 
 2. Choose your chats **before linking**. To read only some chats:
@@ -47,7 +47,7 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
    uv run bridge.py
    ```
    Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
-   It appears there as "MLTeam WhatsApp Groups Reader (read-only)".
+   It appears there as "MLTeam WhatsApp Chats Reader (read-only)".
    The bridge asks for up to one year of past messages. Your phone decides how much it sends,
    and it can take several minutes, so keep the bridge and your phone online meanwhile.
    After that, it stores new messages while it runs.
@@ -66,7 +66,7 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
      "mcpServers": {
        "whatsapp-chats": {
          "command": "uv",
-         "args": ["--directory", "/absolute/path/to/mlteam-whatsapp-groups-mcp", "run", "server.py"]
+         "args": ["--directory", "/absolute/path/to/mlteam-whatsapp-chats-mcp", "run", "server.py"]
        }
      }
    }
@@ -100,7 +100,7 @@ so Claude can search and read them.
 
 - **Keep `data/` private.** `data/session.db` is a logged-in WhatsApp session: anyone with it can act as
   your linked device. Never commit, share or sync it. It is git-ignored and created owner-only.
-- **Revoke any time:** WhatsApp > Settings > Linked devices > remove "MLTeam WhatsApp Groups Reader".
+- **Revoke any time:** WhatsApp > Settings > Linked devices > remove "MLTeam WhatsApp Chats Reader".
 - **Untrusted files:** documents come from other people. They are parsed in a separate
   process with a 120-second limit and never opened or run otherwise.
 - **Prompt injection:** anyone who messages you can write text aimed at Claude. These tools cannot send
