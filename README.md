@@ -15,64 +15,92 @@ Let Claude answer questions from the WhatsApp chats you choose: groups and direc
 
 ## How it works
 
-| Part | What it does |
+One command, `whatsapp-chats`, does three jobs:
+
+| Command | What it does |
 |---|---|
-| `bridge.py` | Links to your WhatsApp as a device (like WhatsApp Web). Saves the text of messages, and of attached documents, from the chats in `chats.txt` (all chats if none are listed) to `data/messages.db`. Messages from other chats are never stored. |
-| `extract.py` | Pulls text out of documents. Runs as a separate process with a time limit. |
-| `server.py` | MCP server with four read-only tools: `list_chats`, `search_messages`, `get_messages`, `get_document`. Opens the database read-only and checks `chats.txt` on every call. |
+| `whatsapp-chats` | The bridge. Links to your WhatsApp as a device (like WhatsApp Web) and, while it runs, saves the text of messages and attached documents from your chosen chats. Messages from other chats are never stored. |
+| `whatsapp-chats server` | The MCP server Claude starts. Four read-only tools: `list_chats`, `search_messages`, `get_messages`, `get_document`. Opens the database read-only and checks `chats.txt` on every call. |
+| `whatsapp-chats folder` | Prints your data folder, which holds `chats.txt` and `data/`. |
+
+Your data folder is:
+
+- Windows: `%LOCALAPPDATA%\MLTeam WhatsApp Chats`
+- macOS: `~/Library/Application Support/MLTeam WhatsApp Chats`
+- Linux: `~/.local/share/MLTeam WhatsApp Chats`
+
+Set `WHATSAPP_CHATS_HOME` to use another folder.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
+Works on Windows, macOS and Linux. On Windows, type the commands in **PowerShell**
+(Start menu > "PowerShell").
 
-1. Clone and enter the repo:
+1. Install [uv](https://docs.astral.sh/uv/), which installs Python and this tool for you.
+
+   Windows:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+   macOS or Linux:
    ```bash
-   git clone https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp.git
-   cd mlteam-whatsapp-chats-mcp
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+   Then close the terminal and open a new one.
+
+2. Install this tool:
+   ```bash
+   uv tool install git+https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp
    ```
 
-2. Choose your chats **before linking**. To read only some chats:
-   ```bash
-   cp chats.example.txt chats.txt
-   ```
-   Add the exact name of each group or contact, one per line (for example `Family Trip`).
-   For direct chats a phone JID such as `905551234567@s.whatsapp.net` is more reliable, because
-   contact names can take a while to sync after linking.
-   Skip this step to read **all** your chats: Claude then sees every group and direct chat.
+3. Optional, **before linking**: choose which chats to read. Skip this to read **all** your chats:
+   Claude then sees every group and direct chat. To choose, create `chats.txt` in your data folder
+   (see above; `whatsapp-chats folder` prints it) with one chat per line: the exact name of a group
+   or contact (for example `Family Trip`), or its ID. For direct chats an ID such as
+   `905551234567@s.whatsapp.net` is more reliable, because contact names can take a while to sync.
+   See [chats.example.txt](chats.example.txt).
    WhatsApp sends past messages only once, at linking, and only chats chosen then are kept.
-   So list every chat you might want now: chats added later get new messages only.
 
-3. Start the bridge, link your WhatsApp, and leave it running:
+4. Start the bridge, link your WhatsApp, and leave the window open:
    ```bash
-   uv run bridge.py
+   whatsapp-chats
    ```
    Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
    It appears there as "MLTeam WhatsApp Chats Reader (read-only)".
    The bridge asks for up to one year of past messages. Your phone decides how much it sends,
    and it can take several minutes, so keep the bridge and your phone online meanwhile.
-   After that, it stores new messages while it runs.
+   After that, it stores new messages whenever it runs. Run `whatsapp-chats` again after a restart.
 
-   Optional, once linked: `uv run bridge.py --list` prints your groups and contacts with their IDs
-   (`120363012345678901@g.us`, `905551234567@s.whatsapp.net`). You can use an ID in `chats.txt`
-   instead of a name; IDs keep working if the name changes.
+   Optional, once linked: `whatsapp-chats --list` prints your groups and contacts with their IDs
+   (`120363012345678901@g.us`, `905551234567@s.whatsapp.net`). IDs keep working if a name changes.
 
-4. Add the MCP server to Claude Code (run in the repo folder):
+5. Connect it to Claude, once.
+
+   Claude Code:
    ```bash
-   claude mcp add whatsapp-chats -- uv --directory "$PWD" run server.py
+   claude mcp add -s user whatsapp-chats -- whatsapp-chats server
    ```
-   For Claude Desktop, add to `claude_desktop_config.json`:
+   Claude Desktop: Settings > Developer > Edit Config, add this to `claude_desktop_config.json`,
+   then restart Claude Desktop:
    ```json
    {
      "mcpServers": {
-       "whatsapp-chats": {
-         "command": "uv",
-         "args": ["--directory", "/absolute/path/to/mlteam-whatsapp-chats-mcp", "run", "server.py"]
-       }
+       "whatsapp-chats": { "command": "whatsapp-chats", "args": ["server"] }
      }
    }
    ```
+   If Claude Desktop cannot find the command, use its full path: run `where.exe whatsapp-chats`
+   (Windows) or `which whatsapp-chats` (macOS) and put that in `"command"` (on Windows, write `\\` for each `\`).
 
-5. Ask Claude, for example: "What did the Family Trip group decide about flights?"
+6. Ask Claude, for example: "What did the Family Trip group decide about flights?"
+
+## Updating
+
+```bash
+uv tool install --force --upgrade git+https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp
+```
+Then restart the bridge and Claude. This also updates the WhatsApp library, which fixes most
+connection errors such as `Client outdated (405)`.
 
 ## Documents
 
@@ -89,8 +117,8 @@ so Claude can search and read them.
 ## Changing chats
 
 - **Add a chat:** add a line to `chats.txt` and restart the bridge. Its earlier messages are not
-  backfilled. To get them, start over: remove the device in WhatsApp > Linked devices, delete `data/`,
-  and run `uv run bridge.py` again.
+  backfilled. To get them, start over: remove the device in WhatsApp > Linked devices, delete `data/`
+  in your data folder, and run `whatsapp-chats` again.
 - **Remove a chat:** delete its line. Claude stops seeing it immediately. To delete its stored messages:
   ```bash
   sqlite3 data/messages.db "DELETE FROM messages WHERE chat_jid='<chat JID>'"
@@ -99,7 +127,7 @@ so Claude can search and read them.
 ## Staying safe
 
 - **Keep `data/` private.** `data/session.db` is a logged-in WhatsApp session: anyone with it can act as
-  your linked device. Never commit, share or sync it. It is git-ignored and created owner-only.
+  your linked device. Never share or sync it (for example with OneDrive or iCloud). It is created owner-only.
 - **Revoke any time:** WhatsApp > Settings > Linked devices > remove "MLTeam WhatsApp Chats Reader".
 - **Untrusted files:** documents come from other people. They are parsed in a separate
   process with a 120-second limit and never opened or run otherwise.
@@ -108,16 +136,20 @@ so Claude can search and read them.
   Keep approving those tools yourself while using this server, or deny them.
 - **Only include chats you are comfortable sending to Claude.** Messages Claude reads go to Anthropic
   like the rest of your conversation.
-- **If it stops connecting** (for example `Client outdated (405)`), update the WhatsApp library:
-  ```bash
-  uv lock --upgrade-package neonize && uv sync
-  ```
+- **If it stops connecting** (for example `Client outdated (405)`), update: see "Updating" above.
 
 ## Development
 
 ```bash
-uv run test_selfcheck.py
+git clone https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp.git
+cd mlteam-whatsapp-chats-mcp
+uv run whatsapp-chats            # run the bridge from the checkout
+uv run test_selfcheck.py         # offline self-check
 ```
-Feeds fake messages through the bridge and server without connecting to WhatsApp. CI runs it on every push.
+The self-check feeds fake messages through the bridge and server without connecting to WhatsApp.
+CI runs it on Windows, macOS and Linux on every push.
+
+Moving from an older checkout that kept `data/` and `chats.txt` in the repo folder: move both into
+your data folder (`uv run whatsapp-chats folder`). The bridge stops with this reminder until you do.
 
 Report security issues privately: see [SECURITY.md](SECURITY.md).

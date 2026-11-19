@@ -1,13 +1,28 @@
 """Paths and helpers shared by bridge.py and server.py."""
+import os
 import sqlite3
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
+
+def user_folder() -> Path:
+    """Per-user folder for chats.txt and data/, outside the installed code. WHATSAPP_CHATS_HOME overrides it."""
+    if os.environ.get("WHATSAPP_CHATS_HOME"):
+        return Path(os.environ["WHATSAPP_CHATS_HOME"])
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / "MLTeam WhatsApp Chats"
+
+
+HOME = user_folder()
+DATA_DIR = HOME / "data"
 MESSAGES_DB = DATA_DIR / "messages.db"
 SESSION_DB = DATA_DIR / "session.db"
-CHATS_FILE = ROOT / "chats.txt"
-OLD_GROUPS_FILE = ROOT / "groups.txt"  # name used before direct chats were read
+CHATS_FILE = HOME / "chats.txt"
 # Groups, phone-numbered and LID-numbered direct chats; not status updates or channels.
 CHAT_SERVERS = ("@g.us", "@s.whatsapp.net", "@lid")
 
@@ -29,8 +44,6 @@ def load_allowlist(path: Path | None = None) -> tuple[set[str], set[str]]:
     Each line holds a JID (contains @) or an exact group or contact name; text after # is ignored.
     """
     path = path or CHATS_FILE
-    if path == CHATS_FILE and not path.exists() and OLD_GROUPS_FILE.exists():
-        raise RuntimeError("groups.txt is now called chats.txt: rename it, or delete it to read all chats.")
     jids, names = set(), set()
     if not path.exists():
         return jids, names
@@ -57,7 +70,7 @@ def is_allowed(jid: str, name: str, jids: set[str], names: set[str]) -> bool:
 
 
 def open_writable() -> sqlite3.Connection:
-    DATA_DIR.mkdir(mode=0o700, exist_ok=True)
+    DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     conn = sqlite3.connect(MESSAGES_DB, check_same_thread=False)
     conn.executescript(SCHEMA)
     MESSAGES_DB.chmod(0o600)

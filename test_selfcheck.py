@@ -1,21 +1,22 @@
 """Offline self-check: fake events -> bridge -> DB -> MCP tools. Run: uv run test_selfcheck.py"""
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-import common
-
 tmp = Path(tempfile.mkdtemp())
-common.DATA_DIR = tmp
-common.MESSAGES_DB = tmp / "messages.db"
-common.CHATS_FILE = tmp / "chats.txt"
-common.OLD_GROUPS_FILE = tmp / "groups.txt"
+os.environ["WHATSAPP_CHATS_HOME"] = str(tmp)  # keep the real data folder out of it
+
+from whatsapp_chats import common
+
+assert common.CHATS_FILE == tmp / "chats.txt" and common.MESSAGES_DB == tmp / "data" / "messages.db"
 common.CHATS_FILE.write_text(
     "# my groups\n111@g.us  # Allowed by JID\n\nFamily Trip  # allowed by name\nhistory only\n"
 )
 
-import bridge
-import server
+from whatsapp_chats import bridge, server
 from neonize.events import HistorySyncEv, MessageEv
 
 bridge.allow, bridge.names = common.load_allowlist()
@@ -88,7 +89,7 @@ groups = {g["jid"]: g for g in server.list_chats()}
 assert groups.keys() == {"111@g.us", "222@g.us", "333@g.us"}, groups
 assert groups["222@g.us"]["name"] == "family trip"
 
-# Removing entries from groups.txt hides them immediately, by JID and by name.
+# Removing entries from chats.txt hides them immediately, by JID and by name.
 common.CHATS_FILE.write_text("history only\n")
 assert server.get_messages("111@g.us") == [] and server.get_messages("222@g.us") == []
 assert len(server.search_messages("friday")) == 1
@@ -118,7 +119,7 @@ assert bridge.DEVICE.requireFullSync and bridge.DEVICE.historySyncConfig.fullSyn
 import io
 import zipfile
 from openpyxl import Workbook
-import extract
+from whatsapp_chats import extract
 
 
 def zip_bytes(files):
@@ -246,12 +247,9 @@ assert server.get_document("999@g.us", "S1")["text"] == "secret"
 common.CHATS_FILE.unlink()
 assert common.reads_all_chats() and len(server.list_chats()) == 7, server.list_chats()
 
-# An old groups.txt is not silently ignored.
-common.OLD_GROUPS_FILE.write_text("Family Trip\n")
-try:
-    common.load_allowlist()
-    raise AssertionError("old groups.txt ignored")
-except RuntimeError as e:
-    assert "chats.txt" in str(e)
+# The installed command runs and finds the per-user folder.
+out = subprocess.run([sys.executable, "-c", "from whatsapp_chats.cli import main; main()", "folder"],
+                     capture_output=True, text=True, check=True).stdout.strip()
+assert out == str(tmp), out
 
 print("self-check OK")

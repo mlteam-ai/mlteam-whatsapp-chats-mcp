@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from mcp.server.mcpserver import MCPServer
 
-from common import is_allowed, load_allowlist, open_readonly, reads_all_chats
+from .common import is_allowed, load_allowlist, open_readonly, reads_all_chats
 
 mcp = MCPServer("whatsapp-chats")
 
@@ -38,7 +38,9 @@ def _rows(sql: str, params: list) -> list[dict]:
             rows = conn.execute(sql.format(allowed=marks), [*allow, *params]).fetchall()
     except sqlite3.OperationalError as e:
         if "no such table" in str(e):
-            raise RuntimeError("Database is from an older version: restart bridge.py once to upgrade it.") from e
+            raise RuntimeError("Database is from an older version: restart the bridge (`whatsapp-chats`) once.") from e
+        if "unable to open" in str(e):
+            raise RuntimeError("No messages yet: run `whatsapp-chats` and link WhatsApp first.") from e
         raise
     out = []
     for r in rows:

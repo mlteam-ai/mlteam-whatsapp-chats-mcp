@@ -6,8 +6,10 @@ and direct chats) listed in chats.txt into data/messages.db. If chats.txt is
 missing or empty, every chat is stored. Document files are not kept, only their
 text. It never sends messages and opens no network ports.
 
-    uv run bridge.py          # link (first run) and store messages from chats.txt
-    uv run bridge.py --list   # after linking: print your groups and contacts with their JIDs
+    whatsapp-chats           # link (first run) and store messages; keep it running
+    whatsapp-chats --list    # after linking: print your groups and contacts with their JIDs
+    whatsapp-chats folder    # print the folder holding chats.txt and your data
+    whatsapp-chats server    # the MCP server; Claude starts it, you don't
 
 WhatsApp sends past history only once, right after linking, so linking happens
 in the normal run where that history gets stored.
@@ -25,9 +27,9 @@ from neonize.events import ConnectedEv, HistorySyncEv, MessageEv
 from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 import DeviceProps
 from neonize.utils.jid import Jid2String
 
-from common import (CHATS_FILE, DATA_DIR, SESSION_DB, is_allowed, is_chat, load_allowlist, open_writable,
+from .common import (CHATS_FILE, DATA_DIR, HOME, SESSION_DB, is_allowed, is_chat, load_allowlist, open_writable,
                     reads_all_chats)
-from extract import SUPPORTED
+from .extract import SUPPORTED
 
 # Asked for at link time; the phone may send less.
 HISTORY_DAYS = 365
@@ -249,31 +251,33 @@ def main() -> None:
     parser.add_argument("--list", action="store_true", help="print your groups and contacts, then exit")
     args = parser.parse_args()
 
-    DATA_DIR.mkdir(mode=0o700, exist_ok=True)
+    old = Path(__file__).resolve().parent.parent / "data"  # where a source checkout kept it before
+    if (old / "session.db").exists() and not SESSION_DB.exists():
+        sys.exit(f"Your data now lives in {HOME}. Move {old} there, and chats.txt too if you have one.")
+    DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     client = NewClient(str(SESSION_DB), props=DEVICE)
 
     if args.list:
         if not is_linked(SESSION_DB):
-            sys.exit("Not linked yet. Run `uv run bridge.py` first: linking there saves the past history "
+            sys.exit("Not linked yet. Run `whatsapp-chats` first: linking there saves the past history "
                      "WhatsApp sends once.")
 
         @client.event(ConnectedEv)
         def _(c: NewClient, __: ConnectedEv) -> None:
             for jid, name in joined_chats(c):
                 print(f"{jid}  # {name}")
-            print(f"\nCopy the lines you want into {CHATS_FILE.name}.")
+            print(f"\nCopy the lines you want into {CHATS_FILE}")
             c.stop()
 
         client.connect()
         return
 
-    try:
-        allow, names = load_allowlist()
-    except RuntimeError as e:
-        sys.exit(str(e))
+    allow, names = load_allowlist()
     every_chat = reads_all_chats()
     if every_chat:
-        print(f"{CHATS_FILE.name} is missing or empty: storing messages from ALL your chats, groups and direct.")
+        print(f"{CHATS_FILE} is missing or empty: storing messages from ALL your chats, groups and direct.")
+    else:
+        print(f"Reading the chats listed in {CHATS_FILE}")
     if not is_linked(SESSION_DB):
         print("Linking: after scanning, keep this running. Past history can take several minutes to arrive.")
     db = open_writable()
