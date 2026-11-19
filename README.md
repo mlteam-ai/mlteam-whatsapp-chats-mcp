@@ -34,7 +34,7 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
    uv run bridge.py --list
    ```
    Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
-   It appears there as "WhatsApp Groups Reader (read-only)".
+   It appears there as "MLTeam WhatsApp Groups Reader (read-only)".
 
 3. Create your group list:
    ```bash
@@ -80,7 +80,7 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
 
 - **Keep `data/` private.** `data/session.db` is a logged-in WhatsApp session: anyone with it can act as
   your linked device. Never commit, share or sync it. It is git-ignored and created owner-only.
-- **Revoke any time:** WhatsApp > Settings > Linked devices > remove "WhatsApp Groups Reader".
+- **Revoke any time:** WhatsApp > Settings > Linked devices > remove "MLTeam WhatsApp Groups Reader".
 - **Prompt injection:** any group member can write text aimed at Claude. These tools cannot send
   anything, but Claude's other tools (shell, web fetch) could leak data if Claude followed such text.
   Keep approving those tools yourself while using this server, or deny them.

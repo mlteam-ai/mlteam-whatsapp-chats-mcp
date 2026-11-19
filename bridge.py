@@ -19,7 +19,7 @@ from neonize.utils.jid import Jid2String
 from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable
 
 # Shown in WhatsApp > Linked devices, so users can spot and revoke it.
-DEVICE = DeviceProps(os="WhatsApp Groups Reader (read-only)", platformType=DeviceProps.SAFARI)
+DEVICE = DeviceProps(os="MLTeam WhatsApp Groups Reader (read-only)", platformType=DeviceProps.SAFARI)
 
 db = None
 db_lock = threading.Lock()
