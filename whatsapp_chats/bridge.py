@@ -20,7 +20,14 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import types
 from pathlib import Path
+
+try:
+    import magic  # noqa: F401  neonize imports it; on macOS/Linux it needs the libmagic system library
+except ImportError:
+    # neonize uses magic only to label media it sends, and this tool never sends anything.
+    sys.modules["magic"] = types.ModuleType("magic")
 
 from neonize.client import NewClient
 from neonize.events import ConnectedEv, HistorySyncEv, MessageEv
