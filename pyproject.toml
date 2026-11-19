@@ -1,0 +1,9 @@
+[project]
+name = "mlteam-whatsapp-groups-mcp"
+version = "0.1.0"
+description = "Read-only MCP server that lets Claude answer questions from WhatsApp groups you choose"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.3.0",
+    "neonize>=0.10.0",
+]

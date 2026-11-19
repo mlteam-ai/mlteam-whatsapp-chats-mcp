@@ -1,0 +1,9 @@
+# Copy this file to groups.txt and list the groups Claude may read, one per line.
+# Each line is either:
+#   - a group name, matched exactly (case-insensitive), or
+#   - a group JID, which keeps working if the group is renamed.
+# Run `uv run bridge.py --list` to see your groups and their JIDs.
+# Text after # is ignored.
+#
+# Family Trip
+# 120363012345678901@g.us  # Work
