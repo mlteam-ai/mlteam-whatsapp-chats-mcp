@@ -1,8 +1,9 @@
 """Read-only WhatsApp bridge.
 
-Links to your account as a device and stores the text of messages from the
-groups listed in groups.txt into data/messages.db. It never sends messages
-and opens no network ports.
+Links to your account as a device and stores the text of messages, and of
+attached documents (PDF, DOCX, XLSX, PPTX, plain text), from the groups listed
+in groups.txt into data/messages.db. Document files are not kept, only their
+text. It never sends messages and opens no network ports.
 
     uv run bridge.py          # link (first run) and store messages from groups.txt
     uv run bridge.py --list   # after linking: print your groups and their JIDs
@@ -11,7 +12,9 @@ WhatsApp sends past history only once, right after linking, so linking happens
 in the normal run where that history gets stored.
 """
 import argparse
+import queue
 import sqlite3
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -22,9 +25,15 @@ from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 import DevicePr
 from neonize.utils.jid import Jid2String
 
 from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable
+from extract import SUPPORTED
 
 # Asked for at link time; the phone may send less.
 HISTORY_DAYS = 365
+
+EXTRACTOR = Path(__file__).resolve().parent / "extract.py"
+MAX_DOC_BYTES = 25 * 1024 * 1024
+MAX_DOC_CHARS = 2_000_000
+EXTRACT_TIMEOUT = 120  # seconds
 
 DEVICE = DeviceProps(
     os="MLTeam WhatsApp Groups Reader (read-only)",  # shown in WhatsApp > Linked devices
@@ -37,6 +46,19 @@ db = None
 db_lock = threading.Lock()
 allow: set[str] = set()  # JIDs to store; group names from groups.txt resolve into it
 names: set[str] = set()
+documents: queue.Queue = queue.Queue()  # (chat, msg_id, message) waiting for text extraction
+
+
+def unwrap(m):
+    """Strip wrappers that history sync leaves on (ephemeral, view-once, captioned documents)."""
+    for _ in range(3):
+        for field in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "documentWithCaptionMessage"):
+            if m.HasField(field):
+                m = getattr(m, field).message
+                break
+        else:
+            return m
+    return m
 
 
 def message_text(m) -> str:
@@ -82,6 +104,7 @@ def remember_group(jid: str, name: str) -> None:
 def save(chat: str, msg_id: str, sender: str, name: str, ts: int, message) -> None:
     if chat not in allow:
         return
+    message = unwrap(message)
     text = message_text(message).strip()
     if not text:
         return
@@ -94,6 +117,54 @@ def save(chat: str, msg_id: str, sender: str, name: str, ts: int, message) -> No
             (chat, msg_id, sender, name, ts, text),
         )
         db.commit()
+    if message.HasField("documentMessage"):
+        documents.put((chat, msg_id, message))
+
+
+def extract_document(client: NewClient, message) -> str:
+    """Download a document and return its text. Raises ValueError with a short reason."""
+    d = message.documentMessage
+    ext = "." + d.fileName.rsplit(".", 1)[-1].lower() if "." in d.fileName else ""
+    if ext not in SUPPORTED:
+        raise ValueError(f"unsupported file type {ext or '(none)'}")
+    if d.fileLength > MAX_DOC_BYTES:
+        raise ValueError(f"larger than {MAX_DOC_BYTES // 1024 // 1024} MB")
+    try:
+        data = client.download_any(message)
+    except Exception as e:
+        raise ValueError(f"download failed, media may have expired: {e}") from e
+    if not data:
+        raise ValueError("download failed, media may have expired")
+    try:
+        r = subprocess.run([sys.executable, "-I", str(EXTRACTOR), d.fileName], input=data,
+                           capture_output=True, timeout=EXTRACT_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        raise ValueError(f"text extraction took over {EXTRACT_TIMEOUT}s") from e
+    if r.returncode:
+        lines = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise ValueError("could not read file: " + (lines[-1] if lines else f"exit {r.returncode}"))
+    return r.stdout.decode("utf-8", "replace")[:MAX_DOC_CHARS]
+
+
+def process_document(client: NewClient, chat: str, msg_id: str, message) -> None:
+    with db_lock:
+        if db.execute("SELECT 1 FROM documents WHERE chat_jid=? AND id=?", (chat, msg_id)).fetchone():
+            return
+    text, error = "", ""
+    try:
+        text = extract_document(client, message)
+    except ValueError as e:
+        error = str(e)[:300]
+    with db_lock:
+        db.execute("INSERT OR REPLACE INTO documents VALUES (?,?,?,?,?)",
+                   (chat, msg_id, message.documentMessage.fileName, text, error))
+        db.commit()
+
+
+def document_worker(client: NewClient) -> None:
+    """Extracts queued documents one at a time, off the WhatsApp event thread."""
+    while True:
+        process_document(client, *documents.get())
 
 
 def on_connected(client: NewClient, _: ConnectedEv) -> None:
@@ -168,6 +239,7 @@ def main() -> None:
     if not is_linked(SESSION_DB):
         print("Linking: after scanning, keep this running. Past history can take several minutes to arrive.")
     db = open_writable()
+    threading.Thread(target=document_worker, args=(client,), daemon=True).start()
 
     client.event(ConnectedEv)(on_connected)
     client.event(MessageEv)(on_message)

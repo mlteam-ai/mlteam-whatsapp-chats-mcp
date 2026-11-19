@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS messages (
     chat_jid TEXT, id TEXT, sender TEXT, sender_name TEXT,
     ts INTEGER, text TEXT, PRIMARY KEY (chat_jid, id));
 CREATE INDEX IF NOT EXISTS messages_ts ON messages (chat_jid, ts);
+CREATE TABLE IF NOT EXISTS documents (
+    chat_jid TEXT, id TEXT, file_name TEXT, text TEXT, error TEXT,
+    PRIMARY KEY (chat_jid, id));
 """
 
 

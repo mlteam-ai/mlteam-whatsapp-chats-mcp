@@ -16,8 +16,9 @@ Let Claude answer questions from the WhatsApp groups you choose.
 
 | Part | What it does |
 |---|---|
-| `bridge.py` | Links to your WhatsApp as a device (like WhatsApp Web). Saves the text of messages from the groups in `groups.txt` to `data/messages.db`. Messages from other groups are never stored. |
-| `server.py` | MCP server with three read-only tools: `list_groups`, `search_messages`, `get_messages`. Opens the database read-only and checks `groups.txt` on every call. |
+| `bridge.py` | Links to your WhatsApp as a device (like WhatsApp Web). Saves the text of messages, and of attached documents, from the groups in `groups.txt` to `data/messages.db`. Messages from other groups are never stored. |
+| `extract.py` | Pulls text out of documents. Runs as a separate process with a time limit. |
+| `server.py` | MCP server with four read-only tools: `list_groups`, `search_messages`, `get_messages`, `get_document`. Opens the database read-only and checks `groups.txt` on every call. |
 
 ## Setup
 
@@ -69,6 +70,18 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
 
 5. Ask Claude, for example: "What did the Family Trip group decide about flights?"
 
+## Documents
+
+The bridge downloads documents shared in your groups and keeps their text (not the files),
+so Claude can search and read them.
+
+- **Supported:** PDF, DOCX, XLSX, PPTX, and plain text (TXT, CSV, MD, JSON, TSV, LOG).
+  Other types, files over 25 MB, and scanned PDFs (images, no text layer) are not read.
+- **Old documents:** WhatsApp deletes media from its servers after a while, so some documents
+  from past history can no longer be downloaded. Claude sees these as "unreadable".
+- **Already linked before this feature?** Documents stored earlier have no text. Only new ones get it,
+  unless you start over (see "Add a group" below).
+
 ## Changing groups
 
 - **Add a group:** add a line to `groups.txt` and restart the bridge. Its earlier messages are not
@@ -84,6 +97,8 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
 - **Keep `data/` private.** `data/session.db` is a logged-in WhatsApp session: anyone with it can act as
   your linked device. Never commit, share or sync it. It is git-ignored and created owner-only.
 - **Revoke any time:** WhatsApp > Settings > Linked devices > remove "MLTeam WhatsApp Groups Reader".
+- **Untrusted files:** documents come from other group members. They are parsed in a separate
+  process with a 120-second limit and never opened or run otherwise.
 - **Prompt injection:** any group member can write text aimed at Claude. These tools cannot send
   anything, but Claude's other tools (shell, web fetch) could leak data if Claude followed such text.
   Keep approving those tools yourself while using this server, or deny them.

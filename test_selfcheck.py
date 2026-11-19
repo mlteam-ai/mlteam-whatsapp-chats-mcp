@@ -105,4 +105,100 @@ with sqlite3.connect(session) as c:
 assert bridge.is_linked(session)
 assert bridge.DEVICE.requireFullSync and bridge.DEVICE.historySyncConfig.fullSyncDaysLimit == 365
 
+# --- Documents: extraction, download flow, server tools ---
+import io
+import zipfile
+from openpyxl import Workbook
+import extract
+
+
+def zip_bytes(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, content in files.items():
+            z.writestr(name, content)
+    return buf.getvalue()
+
+
+DOCX = zip_bytes({"word/document.xml": '<w:document><w:body><w:p><w:r><w:t>Budget total</w:t></w:r>'
+                  '<w:r><w:t xml:space="preserve"> is 42 &amp; final</w:t></w:r></w:p>'
+                  '<w:p><w:r><w:t>Second line</w:t></w:r></w:p></w:body></w:document>'})
+PPTX = zip_bytes({"ppt/slides/slide2.xml": "<p:sld><a:p><a:t>Slide two</a:t></a:p></p:sld>",
+                  "ppt/slides/slide10.xml": "<p:sld><a:p><a:t>Slide ten</a:t></a:p></p:sld>"})
+wb = Workbook(); wb.active.title = "Costs"; wb.active.append(["item", "eur"]); wb.active.append(["hotel", 300])
+buf = io.BytesIO(); wb.save(buf); XLSX = buf.getvalue()
+stream = b"BT /F1 24 Tf 72 700 Td (Hello PDF budget) Tj ET"
+objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+pdf, offsets = b"%PDF-1.4\n", []
+for i, o in enumerate(objs, 1):
+    offsets.append(len(pdf)); pdf += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+xref = len(pdf)
+pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offsets)
+pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+
+assert extract.extract("a.docx", DOCX) == "Budget total is 42 & final\nSecond line"
+assert extract.extract("a.pptx", PPTX) == "[slide 1]\nSlide two\n\n[slide 2]\nSlide ten"
+assert extract.extract("a.XLSX", XLSX) == "[sheet Costs]\nitem\teur\nhotel\t300"
+assert "Hello PDF budget" in extract.extract("a.pdf", pdf)
+assert extract.extract("notes.txt", "çay ı".encode()) == "çay ı"
+for bad in ("a.exe", "noext"):
+    try:
+        extract.extract(bad, b"x"); raise AssertionError("unsupported type accepted")
+    except ValueError:
+        pass
+
+# Bridge flow, extraction in a real subprocess as in production.
+common.GROUPS_FILE.write_text("111@g.us\n")
+FILES = {"plan.docx": DOCX, "costs.pdf": pdf, "broken.pdf": b"%PDF-not really", "app.exe": b"MZ"}
+fake = SimpleNamespace(download_any=lambda m: FILES.get(m.documentMessage.fileName))
+for i, name in enumerate([*FILES, "expired.docx"]):
+    ev = MessageEv()
+    ev.Info.MessageSource.Chat.User, ev.Info.MessageSource.Chat.Server = "111", "g.us"
+    ev.Info.ID, ev.Info.Timestamp = f"D{i}", 1763600000 + i
+    ev.Message.documentMessage.fileName = name
+    ev.Message.documentMessage.fileLength = len(FILES.get(name, b""))
+    bridge.on_message(None, ev)
+# History sync wraps captioned documents; they must still be stored and queued.
+hs = HistorySyncEv()
+w = hs.Data.conversations.add(ID="111@g.us", name="Work").messages.add().message
+w.key.ID, w.messageTimestamp = "D9", 1763600100
+w.message.documentWithCaptionMessage.message.documentMessage.fileName = "costs.pdf"
+w.message.documentWithCaptionMessage.message.documentMessage.caption = "updated costs"
+bridge.on_history(None, hs)
+big = MessageEv(); big.Info.ID = "BIG"; big.Message.documentMessage.fileName = "huge.pdf"
+big.Message.documentMessage.fileLength = bridge.MAX_DOC_BYTES + 1
+assert bridge.documents.qsize() == 6, bridge.documents.qsize()
+while not bridge.documents.empty():
+    bridge.process_document(fake, *bridge.documents.get())
+bridge.process_document(fake, "111@g.us", "BIG", big.Message)
+
+docs = {r[0]: r[1:] for r in bridge.db.execute("SELECT id, text, error FROM documents")}
+assert docs["D0"] == ("Budget total is 42 & final\nSecond line", ""), docs["D0"]
+assert "Hello PDF budget" in docs["D1"][0] and docs["D9"][0] == docs["D1"][0]
+assert docs["D2"][1].startswith("could not read file"), docs["D2"]
+assert docs["D3"][1] == "unsupported file type .exe"
+assert docs["D4"][1] == "download failed, media may have expired"
+assert docs["BIG"][1] == "larger than 25 MB"
+assert bridge.db.execute("SELECT text FROM messages WHERE id='D9'").fetchone()[0] == "[document costs.pdf] updated costs"
+
+hits = server.search_messages("pdf budget")
+assert {h["id"] for h in hits} == {"D1", "D9"}, hits
+assert "Hello PDF budget" in hits[0]["document_snippet"] and hits[0]["group_jid"] == "111@g.us"
+listed = {m["id"]: m for m in server.get_messages("111@g.us")}
+assert listed["D0"]["document"].startswith("text available") and listed["D3"]["document"].startswith("unreadable")
+assert "document" not in listed["A1"]
+doc = server.get_document("111@g.us", "D0", max_chars=1000)
+assert doc["text"].startswith("Budget total") and "next_offset" not in doc
+long = "x" * 2500
+bridge.db.execute("INSERT INTO documents VALUES ('111@g.us','L1','long.txt',?, '')", (long,)); bridge.db.commit()
+p1 = server.get_document("111@g.us", "L1", max_chars=1000)
+p3 = server.get_document("111@g.us", "L1", offset=2000, max_chars=1000)
+assert p1["next_offset"] == 1000 and len(p3["text"]) == 500 and "next_offset" not in p3
+# Allowlist applies to documents too.
+bridge.db.execute("INSERT INTO documents VALUES ('999@g.us','S1','secret.txt','secret','')"); bridge.db.commit()
+assert "error" in server.get_document("999@g.us", "S1")
+
 print("self-check OK")
