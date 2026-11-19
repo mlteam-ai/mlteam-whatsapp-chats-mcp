@@ -1,12 +1,13 @@
 """Read-only WhatsApp bridge.
 
 Links to your account as a device and stores the text of messages, and of
-attached documents (PDF, DOCX, XLSX, PPTX, plain text), from the groups listed
-in groups.txt (every group if the file is empty) into data/messages.db. Document files are not kept, only their
+attached documents (PDF, DOCX, XLSX, PPTX, plain text), from the chats (groups
+and direct chats) listed in chats.txt into data/messages.db. If chats.txt is
+missing or empty, every chat is stored. Document files are not kept, only their
 text. It never sends messages and opens no network ports.
 
-    uv run bridge.py          # link (first run) and store messages from groups.txt
-    uv run bridge.py --list   # after linking: print your groups and their JIDs
+    uv run bridge.py          # link (first run) and store messages from chats.txt
+    uv run bridge.py --list   # after linking: print your groups and contacts with their JIDs
 
 WhatsApp sends past history only once, right after linking, so linking happens
 in the normal run where that history gets stored.
@@ -24,7 +25,8 @@ from neonize.events import ConnectedEv, HistorySyncEv, MessageEv
 from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 import DeviceProps
 from neonize.utils.jid import Jid2String
 
-from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable, reads_all_groups
+from common import (CHATS_FILE, DATA_DIR, SESSION_DB, is_allowed, is_chat, load_allowlist, open_writable,
+                    reads_all_chats)
 from extract import SUPPORTED
 
 # Asked for at link time; the phone may send less.
@@ -44,9 +46,9 @@ DEVICE = DeviceProps(
 
 db = None
 db_lock = threading.Lock()
-allow: set[str] = set()  # JIDs to store; group names from groups.txt resolve into it
+allow: set[str] = set()  # JIDs to store; chat names from chats.txt resolve into it
 names: set[str] = set()
-every_group = False  # groups.txt is empty: store all groups
+every_chat = False  # chats.txt is missing or empty: store all chats
 documents: queue.Queue = queue.Queue()  # (chat, msg_id, message) waiting for text extraction
 
 
@@ -95,7 +97,28 @@ def is_linked(session_db: Path) -> bool:
         return False
 
 
-def remember_group(jid: str, name: str) -> None:
+def contact_name(info) -> str:
+    return info.FullName or info.FirstName or info.PushName or info.BusinessName
+
+
+def joined_chats(client: NewClient) -> list[tuple[str, str]]:
+    """(JID, name) of your groups and contacts. Contacts can be missing right after linking."""
+    chats = [(Jid2String(g.JID), g.GroupName.Name) for g in client.get_joined_groups()]
+    return chats + [(Jid2String(c.JID), contact_name(c.Info)) for c in client.contact.get_all_contacts()]
+
+
+def wanted(jid: str, name: str) -> bool:
+    if every_chat:
+        return is_chat(jid)
+    return is_allowed(jid, name, allow, names)
+
+
+def phone_jid(jid: str, alt: str) -> str:
+    """Direct chats can arrive under a LID (hidden number); file them under the phone JID when known."""
+    return alt if jid.endswith("@lid") and alt.endswith("@s.whatsapp.net") else jid
+
+
+def remember_chat(jid: str, name: str) -> None:
     allow.add(jid)
     with db_lock:
         db.execute("INSERT OR REPLACE INTO chats VALUES (?,?)", (jid, name))
@@ -104,9 +127,11 @@ def remember_group(jid: str, name: str) -> None:
 
 def save(chat: str, msg_id: str, sender: str, name: str, ts: int, message) -> None:
     if chat not in allow:
-        if not (every_group and chat.endswith("@g.us")):
+        # A chat first seen while running: in a direct chat the other person's name names the chat.
+        chat_name = "" if chat.endswith("@g.us") or name == "me" else name
+        if not wanted(chat, chat_name):
             return
-        remember_group(chat, "")  # joined while running; name fills in on next connect
+        remember_chat(chat, chat_name)
     message = unwrap(message)
     text = message_text(message).strip()
     if not text:
@@ -172,24 +197,28 @@ def document_worker(client: NewClient) -> None:
 
 def on_connected(client: NewClient, _: ConnectedEv) -> None:
     matched: dict[str, list[str]] = {}
-    for g in client.get_joined_groups():
-        jid, name = Jid2String(g.JID), g.GroupName.Name
-        if every_group or is_allowed(jid, name, allow, names):
-            remember_group(jid, name)
-            matched.setdefault(name.casefold(), []).append(jid)
+    for jid, name in joined_chats(client):
+        if wanted(jid, name):
+            remember_chat(jid, name)
+            if name:
+                matched.setdefault(name.casefold(), []).append(jid)
     for n in sorted(names):
         hits = matched.get(n, [])
         if not hits:
-            print(f"warning: no group named {n!r} (names must match exactly)", file=sys.stderr)
+            print(f"warning: no chat named {n!r} (names must match exactly)", file=sys.stderr)
         elif len(hits) > 1:
-            print(f"warning: {len(hits)} groups named {n!r}; reading all. Use JIDs to pick one.", file=sys.stderr)
-    print(f"Connected. Storing messages from {len(allow)} group(s). Ctrl+C to stop.")
+            print(f"warning: {len(hits)} chats named {n!r}; reading all. Use JIDs to pick one.", file=sys.stderr)
+    if every_chat:
+        print("Connected. Storing messages from all chats. Ctrl+C to stop.")
+    else:
+        print(f"Connected. Storing messages from {len(allow)} chat(s). Ctrl+C to stop.")
 
 
 def on_message(_: NewClient, ev: MessageEv) -> None:
     src = ev.Info.MessageSource
+    alt = src.RecipientAlt if src.IsFromMe else src.SenderAlt
     save(
-        Jid2String(src.Chat),
+        phone_jid(Jid2String(src.Chat), Jid2String(alt) if alt.User else ""),
         ev.Info.ID,
         src.Sender.User,
         "me" if src.IsFromMe else ev.Info.Pushname,
@@ -200,21 +229,24 @@ def on_message(_: NewClient, ev: MessageEv) -> None:
 
 def on_history(_: NewClient, ev: HistorySyncEv) -> None:
     for conv in ev.Data.conversations:
-        if conv.ID not in allow:
-            if not (every_group and conv.ID.endswith("@g.us")) and not is_allowed(conv.ID, conv.name, set(), names):
+        chat = phone_jid(conv.ID, conv.pnJID)
+        if chat not in allow:
+            name = conv.name or conv.displayName
+            if not wanted(chat, name):
                 continue
-            remember_group(conv.ID, conv.name)
+            remember_chat(chat, name)
         for hm in conv.messages:
             w = hm.message
-            sender = (w.key.participant or w.participant).split("@")[0]
-            save(conv.ID, w.key.ID, sender, "me" if w.key.fromMe else w.pushName,
+            # In direct chats the participant is empty: the sender is the chat itself unless it is you.
+            sender = (w.key.participant or w.participant or ("" if w.key.fromMe else chat)).split("@")[0]
+            save(chat, w.key.ID, sender, "me" if w.key.fromMe else w.pushName,
                  w.messageTimestamp, w.message)
 
 
 def main() -> None:
-    global db, allow, names, every_group
+    global db, allow, names, every_chat
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--list", action="store_true", help="print joined groups and exit")
+    parser.add_argument("--list", action="store_true", help="print your groups and contacts, then exit")
     args = parser.parse_args()
 
     DATA_DIR.mkdir(mode=0o700, exist_ok=True)
@@ -222,26 +254,26 @@ def main() -> None:
 
     if args.list:
         if not is_linked(SESSION_DB):
-            sys.exit(f"Not linked yet. Add group names to {GROUPS_FILE.name} and run `uv run bridge.py` "
-                     "first: linking there saves the past history WhatsApp sends once.")
+            sys.exit("Not linked yet. Run `uv run bridge.py` first: linking there saves the past history "
+                     "WhatsApp sends once.")
 
         @client.event(ConnectedEv)
         def _(c: NewClient, __: ConnectedEv) -> None:
-            for g in c.get_joined_groups():
-                print(f"{Jid2String(g.JID)}  # {g.GroupName.Name}")
-            print(f"\nCopy the lines you want into {GROUPS_FILE.name}.")
+            for jid, name in joined_chats(c):
+                print(f"{jid}  # {name}")
+            print(f"\nCopy the lines you want into {CHATS_FILE.name}.")
             c.stop()
 
         client.connect()
         return
 
-    if not GROUPS_FILE.exists():
-        sys.exit(f"No {GROUPS_FILE.name}. Copy groups.example.txt to {GROUPS_FILE.name}, then add the "
-                 "exact names of the groups to read, or leave it empty to read every group.")
-    allow, names = load_allowlist()
-    every_group = reads_all_groups()
-    if every_group:
-        print(f"{GROUPS_FILE.name} is empty: storing messages from ALL your groups.")
+    try:
+        allow, names = load_allowlist()
+    except RuntimeError as e:
+        sys.exit(str(e))
+    every_chat = reads_all_chats()
+    if every_chat:
+        print(f"{CHATS_FILE.name} is missing or empty: storing messages from ALL your chats, groups and direct.")
     if not is_linked(SESSION_DB):
         print("Linking: after scanning, keep this running. Past history can take several minutes to arrive.")
     db = open_writable()

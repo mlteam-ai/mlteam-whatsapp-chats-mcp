@@ -1,4 +1,5 @@
 .venv/
 data/
 groups.txt
+chats.txt
 __pycache__/

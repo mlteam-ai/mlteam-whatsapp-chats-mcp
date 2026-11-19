@@ -8,6 +8,6 @@ Please report vulnerabilities privately through GitHub:
 Changes that break any of these are treated as security bugs:
 
 - The bridge never sends WhatsApp messages and opens no network ports.
-- The MCP server opens the database read-only and returns only groups listed in `groups.txt`.
-- Each user's WhatsApp session, group list and messages stay on their own machine
-  (`data/` and `groups.txt` are git-ignored).
+- The MCP server opens the database read-only and returns only chats listed in `chats.txt` (all chats if none are listed).
+- Each user's WhatsApp session, chat list and messages stay on their own machine
+  (`data/` and `chats.txt` are git-ignored).

@@ -1,0 +1,14 @@
+# Copy this file to chats.txt and list the chats Claude may read, one per line.
+# Without chats.txt (or with no chat lines in it), ALL your chats are read: groups and direct chats.
+# Each line is either:
+#   - a group or contact name, matched exactly (case-insensitive), or
+#   - a chat JID, which keeps working if the name changes.
+# Fill this in before the first `uv run bridge.py`: past messages are kept only for
+# chats listed at linking. Once linked, `uv run bridge.py --list` shows group and contact JIDs.
+# Contact names come from your phone's address book and can take a while to sync after linking,
+# so for direct chats a phone JID is more reliable.
+# Text after # is ignored.
+#
+# Family Trip
+# 120363012345678901@g.us  # Work
+# 905551234567@s.whatsapp.net  # Ali, by phone number (country code, no +)

@@ -8,8 +8,9 @@ import common
 tmp = Path(tempfile.mkdtemp())
 common.DATA_DIR = tmp
 common.MESSAGES_DB = tmp / "messages.db"
-common.GROUPS_FILE = tmp / "groups.txt"
-common.GROUPS_FILE.write_text(
+common.CHATS_FILE = tmp / "chats.txt"
+common.OLD_GROUPS_FILE = tmp / "groups.txt"
+common.CHATS_FILE.write_text(
     "# my groups\n111@g.us  # Allowed by JID\n\nFamily Trip  # allowed by name\nhistory only\n"
 )
 
@@ -29,17 +30,25 @@ def group(jid, name):
 
 
 # Connect: JID entry and case-insensitive name entry resolve; other groups don't.
-fake_client = SimpleNamespace(get_joined_groups=lambda: [
-    group("111@g.us", "Work"), group("222@g.us", "family trip"), group("999@g.us", "Secret")])
+def contact(jid, name):
+    return SimpleNamespace(JID=group(jid, "").JID,
+                           Info=SimpleNamespace(FullName=name, FirstName="", PushName="", BusinessName=""))
+
+
+fake_client = SimpleNamespace(
+    get_joined_groups=lambda: [group("111@g.us", "Work"), group("222@g.us", "family trip"), group("999@g.us", "Secret")],
+    contact=SimpleNamespace(get_all_contacts=lambda: [contact("905551110000@s.whatsapp.net", "Ali Veli")]))
 bridge.Jid2String = lambda j: f"{j.User}@{j.Server}"
 bridge.on_connected(fake_client, None)
 assert bridge.allow == {"111@g.us", "222@g.us"}, bridge.allow
 
 
-def live(chat, msg_id, text, ts_ms):
+def live(chat, msg_id, text, ts_ms, alt=""):
     ev = MessageEv()
     src = ev.Info.MessageSource
     src.Chat.User, src.Chat.Server = chat.split("@")
+    if alt:
+        src.SenderAlt.User, src.SenderAlt.Server = alt.split("@")
     src.Sender.User = "905551112233"
     ev.Info.ID, ev.Info.Pushname, ev.Info.Timestamp = msg_id, "Ayse", ts_ms
     ev.Message.conversation = text
@@ -75,12 +84,12 @@ assert hits[-1]["sender_name"] == "Mehmet" and hits[-1]["sender"] == "9055500000
 assert [m["text"] for m in server.get_messages("111@g.us")] == [
     "Old note about Friday", "[image] friday agenda", "Meeting moved to Friday"]
 assert server.get_messages("999@g.us") == []
-groups = {g["jid"]: g for g in server.list_groups()}
+groups = {g["jid"]: g for g in server.list_chats()}
 assert groups.keys() == {"111@g.us", "222@g.us", "333@g.us"}, groups
 assert groups["222@g.us"]["name"] == "family trip"
 
 # Removing entries from groups.txt hides them immediately, by JID and by name.
-common.GROUPS_FILE.write_text("history only\n")
+common.CHATS_FILE.write_text("history only\n")
 assert server.get_messages("111@g.us") == [] and server.get_messages("222@g.us") == []
 assert len(server.search_messages("friday")) == 1
 
@@ -151,7 +160,7 @@ for bad in ("a.exe", "noext"):
         pass
 
 # Bridge flow, extraction in a real subprocess as in production.
-common.GROUPS_FILE.write_text("111@g.us\n")
+common.CHATS_FILE.write_text("111@g.us\n")
 FILES = {"plan.docx": DOCX, "costs.pdf": pdf, "broken.pdf": b"%PDF-not really", "app.exe": b"MZ"}
 fake = SimpleNamespace(download_any=lambda m: FILES.get(m.documentMessage.fileName))
 for i, name in enumerate([*FILES, "expired.docx"]):
@@ -186,7 +195,7 @@ assert bridge.db.execute("SELECT text FROM messages WHERE id='D9'").fetchone()[0
 
 hits = server.search_messages("pdf budget")
 assert {h["id"] for h in hits} == {"D1", "D9"}, hits
-assert "Hello PDF budget" in hits[0]["document_snippet"] and hits[0]["group_jid"] == "111@g.us"
+assert "Hello PDF budget" in hits[0]["document_snippet"] and hits[0]["chat_jid"] == "111@g.us"
 listed = {m["id"]: m for m in server.get_messages("111@g.us")}
 assert listed["D0"]["document"].startswith("text available") and listed["D3"]["document"].startswith("unreadable")
 assert "document" not in listed["A1"]
@@ -201,19 +210,48 @@ assert p1["next_offset"] == 1000 and len(p3["text"]) == 500 and "next_offset" no
 bridge.db.execute("INSERT INTO documents VALUES ('999@g.us','S1','secret.txt','secret','')"); bridge.db.commit()
 assert "error" in server.get_document("999@g.us", "S1")
 
-# Empty groups.txt (comments only): every group is stored and shown, direct chats are not.
-common.GROUPS_FILE.write_text("# read everything\n")
-assert common.reads_all_groups()
+# Direct chats: by contact name, by phone JID when the chat uses a LID, and in history sync.
+common.CHATS_FILE.write_text("ali veli\n905559990000@s.whatsapp.net\n")
 bridge.allow, bridge.names = common.load_allowlist()
-bridge.every_group = True
 bridge.on_connected(fake_client, None)
-assert bridge.allow == {"111@g.us", "222@g.us", "999@g.us"}, bridge.allow
+assert bridge.allow == {"905559990000@s.whatsapp.net", "905551110000@s.whatsapp.net"}, bridge.allow
+live("905551110000@s.whatsapp.net", "DM1", "Sunday lunch?", 1763700000000)
+live("123456@lid", "DM2", "Sunday works", 1763700000000, alt="905559990000@s.whatsapp.net")
+live("905557770000@s.whatsapp.net", "DM3", "Sunday spam", 1763700000000)
+live("111@g.us", "A9", "Sunday in an unlisted group", 1763700000000)
+hs = HistorySyncEv()
+conv = hs.Data.conversations.add(ID="905551110000@s.whatsapp.net", name="Ali Veli")
+w = conv.messages.add().message
+w.key.ID, w.messageTimestamp, w.message.conversation = "DMH", 1763600000, "Sunday last week"
+bridge.on_history(None, hs)
+hits = {h["id"]: h for h in server.search_messages("sunday")}
+assert hits.keys() == {"DM1", "DM2", "DMH"}, hits
+assert hits["DMH"]["sender"] == "905551110000" and hits["DM1"]["chat"] == "Ali Veli"
+assert hits["DM2"]["chat_jid"] == "905559990000@s.whatsapp.net"
+
+# Missing or empty chats.txt: every chat is stored and shown, but not status updates.
+common.CHATS_FILE.write_text("# read everything\n")
+assert common.reads_all_chats()
+bridge.allow, bridge.names = common.load_allowlist()
+bridge.every_chat = True
+bridge.on_connected(fake_client, None)
+assert bridge.allow == {"111@g.us", "222@g.us", "999@g.us", "905551110000@s.whatsapp.net"}, bridge.allow
 live("999@g.us", "X2", "Saturday plan", 1763600000000)
 live("444@g.us", "N1", "Saturday in a group joined while running", 1763600000000)
-live("905551112233@s.whatsapp.net", "DM1", "Saturday direct message", 1763600000000)
-assert {h["group_jid"] for h in server.search_messages("saturday")} == {"999@g.us", "444@g.us"}
+live("905557770000@s.whatsapp.net", "DM4", "Saturday direct message", 1763600000000)
+live("status@broadcast", "ST1", "Saturday status", 1763600000000)
+assert {h["chat_jid"] for h in server.search_messages("saturday")} == {
+    "999@g.us", "444@g.us", "905557770000@s.whatsapp.net"}
 assert server.get_document("999@g.us", "S1")["text"] == "secret"
-common.GROUPS_FILE.unlink()  # missing file is not "read all"
-assert not common.reads_all_groups() and server.list_groups() == []
+common.CHATS_FILE.unlink()
+assert common.reads_all_chats() and len(server.list_chats()) == 7, server.list_chats()
+
+# An old groups.txt is not silently ignored.
+common.OLD_GROUPS_FILE.write_text("Family Trip\n")
+try:
+    common.load_allowlist()
+    raise AssertionError("old groups.txt ignored")
+except RuntimeError as e:
+    assert "chats.txt" in str(e)
 
 print("self-check OK")

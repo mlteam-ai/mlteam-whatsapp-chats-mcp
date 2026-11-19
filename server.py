@@ -1,17 +1,17 @@
 """Read-only MCP server over data/messages.db.
 
-Opens the DB read-only and returns only groups listed in groups.txt, so
-removing a group from the file hides it at once, even if old rows remain.
-An empty groups.txt returns every stored group.
+Opens the DB read-only and returns only chats listed in chats.txt, so
+removing a chat from the file hides it at once, even if old rows remain.
+A missing or empty chats.txt returns every stored chat.
 """
 import sqlite3
 from datetime import datetime, timezone
 
 from mcp.server.mcpserver import MCPServer
 
-from common import is_allowed, load_allowlist, open_readonly, reads_all_groups
+from common import is_allowed, load_allowlist, open_readonly, reads_all_chats
 
-mcp = MCPServer("whatsapp-groups")
+mcp = MCPServer("whatsapp-chats")
 
 # Shown on document messages so the model knows whether get_document will work.
 DOC_STATUS = """CASE
@@ -27,7 +27,7 @@ def _since(iso: str | None) -> int:
 
 def _rows(sql: str, params: list) -> list[dict]:
     jids, names = load_allowlist()
-    every = reads_all_groups()
+    every = reads_all_chats()
     try:
         with open_readonly() as conn:
             chats = conn.execute("SELECT jid, name FROM chats").fetchall()
@@ -56,8 +56,8 @@ def _snippet(text: str, query: str, width: int = 300) -> str:
 
 
 @mcp.tool()
-def list_groups() -> list[dict]:
-    """List the WhatsApp groups you may read, with message counts and date range."""
+def list_chats() -> list[dict]:
+    """List the WhatsApp chats (groups and direct chats) you may read, with message counts and date range."""
     return _rows(
         """SELECT m.chat_jid AS jid, c.name, COUNT(*) AS messages,
                   datetime(MIN(m.ts), 'unixepoch') AS first_utc,
@@ -69,22 +69,22 @@ def list_groups() -> list[dict]:
 
 
 @mcp.tool()
-def search_messages(query: str, group_jid: str | None = None, since: str | None = None, limit: int = 50) -> list[dict]:
-    """Search message text and attached document text (case-insensitive substring) in allowed groups.
+def search_messages(query: str, chat_jid: str | None = None, since: str | None = None, limit: int = 50) -> list[dict]:
+    """Search message text and attached document text (case-insensitive substring) in allowed chats.
 
-    group_jid: limit to one group. since: ISO date like 2026-11-01. Newest first.
+    chat_jid: limit to one chat. since: ISO date like 2026-11-01. Newest first.
     Document matches include a snippet; read the full text with get_document.
     """
     # shortcut: LIKE scan, fine for tens of thousands of messages; switch to FTS5 if slow.
     rows = _rows(
-        f"""SELECT m.chat_jid AS group_jid, c.name AS grp, m.id, m.sender_name, m.sender, m.ts, m.text,
+        f"""SELECT m.chat_jid, c.name AS chat, m.id, m.sender_name, m.sender, m.ts, m.text,
                    {DOC_STATUS}, d.text AS doc_text
             FROM messages m LEFT JOIN chats c ON c.jid = m.chat_jid
             LEFT JOIN documents d ON d.chat_jid = m.chat_jid AND d.id = m.id
             WHERE m.chat_jid IN ({{allowed}}) AND (m.text LIKE ? OR d.text LIKE ?) AND m.ts >= ?
               AND (? IS NULL OR m.chat_jid = ?)
             ORDER BY m.ts DESC LIMIT ?""",
-        [f"%{query}%"] * 2 + [_since(since), group_jid, group_jid, min(limit, 500)],
+        [f"%{query}%"] * 2 + [_since(since), chat_jid, chat_jid, min(limit, 500)],
     )
     for r in rows:
         doc_text = r.pop("doc_text", "")
@@ -94,32 +94,32 @@ def search_messages(query: str, group_jid: str | None = None, since: str | None 
 
 
 @mcp.tool()
-def get_messages(group_jid: str, since: str | None = None, limit: int = 200) -> list[dict]:
-    """Read a group's messages in time order. since: ISO date; default returns the latest `limit` messages."""
+def get_messages(chat_jid: str, since: str | None = None, limit: int = 200) -> list[dict]:
+    """Read a chat's messages in time order. since: ISO date; default returns the latest `limit` messages."""
     rows = _rows(
         f"""SELECT m.id, m.sender_name, m.sender, m.ts, m.text, {DOC_STATUS}
             FROM messages m LEFT JOIN documents d ON d.chat_jid = m.chat_jid AND d.id = m.id
             WHERE m.chat_jid IN ({{allowed}}) AND m.chat_jid = ? AND m.ts >= ?
             ORDER BY m.ts DESC LIMIT ?""",
-        [group_jid, _since(since), min(limit, 1000)],
+        [chat_jid, _since(since), min(limit, 1000)],
     )
     return rows[::-1]
 
 
 @mcp.tool()
-def get_document(group_jid: str, message_id: str, offset: int = 0, max_chars: int = 20000) -> dict:
+def get_document(chat_jid: str, message_id: str, offset: int = 0, max_chars: int = 20000) -> dict:
     """Read the extracted text of a document attached to a message, in pages.
 
-    Use the group_jid and id from search_messages or get_messages. For long documents,
+    Use the chat_jid and id from search_messages or get_messages. For long documents,
     call again with offset = next_offset until it is absent.
     """
     rows = _rows(
         """SELECT file_name, text, error FROM documents
            WHERE chat_jid IN ({allowed}) AND chat_jid = ? AND id = ?""",
-        [group_jid, message_id],
+        [chat_jid, message_id],
     )
     if not rows:
-        return {"error": "no extracted document for this message in an allowed group"}
+        return {"error": "no extracted document for this message in an allowed chat"}
     doc = rows[0]
     if doc.get("error"):
         return {"file_name": doc["file_name"], "error": doc["error"]}

@@ -6,7 +6,10 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 MESSAGES_DB = DATA_DIR / "messages.db"
 SESSION_DB = DATA_DIR / "session.db"
-GROUPS_FILE = ROOT / "groups.txt"
+CHATS_FILE = ROOT / "chats.txt"
+OLD_GROUPS_FILE = ROOT / "groups.txt"  # name used before direct chats were read
+# Groups, phone-numbered and LID-numbered direct chats; not status updates or channels.
+CHAT_SERVERS = ("@g.us", "@s.whatsapp.net", "@lid")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (jid TEXT PRIMARY KEY, name TEXT);
@@ -21,27 +24,32 @@ CREATE TABLE IF NOT EXISTS documents (
 
 
 def load_allowlist(path: Path | None = None) -> tuple[set[str], set[str]]:
-    """Read groups.txt into (group JIDs, casefolded group names).
+    """Read chats.txt into (chat JIDs, casefolded chat names).
 
-    Each line holds a JID (ends in @g.us) or an exact group name; text after # is ignored.
+    Each line holds a JID (contains @) or an exact group or contact name; text after # is ignored.
     """
-    path = path or GROUPS_FILE
+    path = path or CHATS_FILE
+    if path == CHATS_FILE and not path.exists() and OLD_GROUPS_FILE.exists():
+        raise RuntimeError("groups.txt is now called chats.txt: rename it, or delete it to read all chats.")
     jids, names = set(), set()
     if not path.exists():
         return jids, names
     for line in path.read_text().splitlines():
         entry = line.split("#", 1)[0].strip()
-        if entry.endswith("@g.us"):
+        if "@" in entry:
             jids.add(entry)
         elif entry:
             names.add(entry.casefold())
     return jids, names
 
 
-def reads_all_groups(path: Path | None = None) -> bool:
-    """True when groups.txt exists but lists no groups: then every group is read."""
-    path = path or GROUPS_FILE
-    return path.exists() and load_allowlist(path) == (set(), set())
+def reads_all_chats(path: Path | None = None) -> bool:
+    """True when chats.txt is missing or lists no chats: then every chat is read."""
+    return load_allowlist(path) == (set(), set())
+
+
+def is_chat(jid: str) -> bool:
+    return jid.endswith(CHAT_SERVERS)
 
 
 def is_allowed(jid: str, name: str, jids: set[str], names: set[str]) -> bool:
