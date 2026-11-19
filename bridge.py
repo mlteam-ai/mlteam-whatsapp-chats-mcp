@@ -2,7 +2,7 @@
 
 Links to your account as a device and stores the text of messages, and of
 attached documents (PDF, DOCX, XLSX, PPTX, plain text), from the groups listed
-in groups.txt into data/messages.db. Document files are not kept, only their
+in groups.txt (every group if the file is empty) into data/messages.db. Document files are not kept, only their
 text. It never sends messages and opens no network ports.
 
     uv run bridge.py          # link (first run) and store messages from groups.txt
@@ -24,7 +24,7 @@ from neonize.events import ConnectedEv, HistorySyncEv, MessageEv
 from neonize.proto.waCompanionReg.WAWebProtobufsCompanionReg_pb2 import DeviceProps
 from neonize.utils.jid import Jid2String
 
-from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable
+from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable, reads_all_groups
 from extract import SUPPORTED
 
 # Asked for at link time; the phone may send less.
@@ -46,6 +46,7 @@ db = None
 db_lock = threading.Lock()
 allow: set[str] = set()  # JIDs to store; group names from groups.txt resolve into it
 names: set[str] = set()
+every_group = False  # groups.txt is empty: store all groups
 documents: queue.Queue = queue.Queue()  # (chat, msg_id, message) waiting for text extraction
 
 
@@ -103,7 +104,9 @@ def remember_group(jid: str, name: str) -> None:
 
 def save(chat: str, msg_id: str, sender: str, name: str, ts: int, message) -> None:
     if chat not in allow:
-        return
+        if not (every_group and chat.endswith("@g.us")):
+            return
+        remember_group(chat, "")  # joined while running; name fills in on next connect
     message = unwrap(message)
     text = message_text(message).strip()
     if not text:
@@ -171,7 +174,7 @@ def on_connected(client: NewClient, _: ConnectedEv) -> None:
     matched: dict[str, list[str]] = {}
     for g in client.get_joined_groups():
         jid, name = Jid2String(g.JID), g.GroupName.Name
-        if is_allowed(jid, name, allow, names):
+        if every_group or is_allowed(jid, name, allow, names):
             remember_group(jid, name)
             matched.setdefault(name.casefold(), []).append(jid)
     for n in sorted(names):
@@ -198,7 +201,7 @@ def on_message(_: NewClient, ev: MessageEv) -> None:
 def on_history(_: NewClient, ev: HistorySyncEv) -> None:
     for conv in ev.Data.conversations:
         if conv.ID not in allow:
-            if not is_allowed(conv.ID, conv.name, set(), names):
+            if not (every_group and conv.ID.endswith("@g.us")) and not is_allowed(conv.ID, conv.name, set(), names):
                 continue
             remember_group(conv.ID, conv.name)
         for hm in conv.messages:
@@ -209,7 +212,7 @@ def on_history(_: NewClient, ev: HistorySyncEv) -> None:
 
 
 def main() -> None:
-    global db, allow, names
+    global db, allow, names, every_group
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--list", action="store_true", help="print joined groups and exit")
     args = parser.parse_args()
@@ -232,10 +235,13 @@ def main() -> None:
         client.connect()
         return
 
+    if not GROUPS_FILE.exists():
+        sys.exit(f"No {GROUPS_FILE.name}. Copy groups.example.txt to {GROUPS_FILE.name}, then add the "
+                 "exact names of the groups to read, or leave it empty to read every group.")
     allow, names = load_allowlist()
-    if not allow and not names:
-        sys.exit(f"{GROUPS_FILE.name} lists no groups. Copy groups.example.txt to "
-                 f"{GROUPS_FILE.name}, then add the exact names of the groups to read.")
+    every_group = reads_all_groups()
+    if every_group:
+        print(f"{GROUPS_FILE.name} is empty: storing messages from ALL your groups.")
     if not is_linked(SESSION_DB):
         print("Linking: after scanning, keep this running. Past history can take several minutes to arrive.")
     db = open_writable()

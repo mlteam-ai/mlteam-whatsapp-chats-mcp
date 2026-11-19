@@ -4,7 +4,8 @@ Let Claude answer questions from the WhatsApp groups you choose.
 
 - **Your own account:** each user links their own WhatsApp by scanning a QR code. No shared server
   and no shared credentials.
-- **Your own groups:** you list the groups Claude may read, by name or ID, in `groups.txt`.
+- **Your own groups:** you list the groups Claude may read, by name or ID, in `groups.txt`,
+  or leave it empty to read all your groups. Direct (one-to-one) chats are never read.
 - **Read-only:** it cannot send messages, opens no network ports, and all data stays on your machine.
 
 > Not affiliated with WhatsApp or Meta. This uses an unofficial client
@@ -35,6 +36,7 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
    cp groups.example.txt groups.txt
    ```
    Add the exact name of each group, one per line (for example `Family Trip`).
+   Or leave it with no group lines to read **all** your groups; Claude then sees every group you are in.
    WhatsApp sends past messages only once, at linking, and only groups in this file are kept.
    So list every group you might want now: groups added later get new messages only.
 

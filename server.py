@@ -2,13 +2,14 @@
 
 Opens the DB read-only and returns only groups listed in groups.txt, so
 removing a group from the file hides it at once, even if old rows remain.
+An empty groups.txt returns every stored group.
 """
 import sqlite3
 from datetime import datetime, timezone
 
 from mcp.server.mcpserver import MCPServer
 
-from common import is_allowed, load_allowlist, open_readonly
+from common import is_allowed, load_allowlist, open_readonly, reads_all_groups
 
 mcp = MCPServer("whatsapp-groups")
 
@@ -26,10 +27,11 @@ def _since(iso: str | None) -> int:
 
 def _rows(sql: str, params: list) -> list[dict]:
     jids, names = load_allowlist()
+    every = reads_all_groups()
     try:
         with open_readonly() as conn:
             chats = conn.execute("SELECT jid, name FROM chats").fetchall()
-            allow = sorted({c["jid"] for c in chats if is_allowed(c["jid"], c["name"], jids, names)} | jids)
+            allow = sorted({c["jid"] for c in chats if every or is_allowed(c["jid"], c["name"], jids, names)} | jids)
             if not allow:
                 return []
             marks = ",".join("?" * len(allow))

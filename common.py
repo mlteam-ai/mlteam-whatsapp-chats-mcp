@@ -38,6 +38,12 @@ def load_allowlist(path: Path | None = None) -> tuple[set[str], set[str]]:
     return jids, names
 
 
+def reads_all_groups(path: Path | None = None) -> bool:
+    """True when groups.txt exists but lists no groups: then every group is read."""
+    path = path or GROUPS_FILE
+    return path.exists() and load_allowlist(path) == (set(), set())
+
+
 def is_allowed(jid: str, name: str, jids: set[str], names: set[str]) -> bool:
     return jid in jids or (bool(name) and name.casefold() in names)
 

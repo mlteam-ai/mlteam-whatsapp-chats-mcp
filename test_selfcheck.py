@@ -201,4 +201,19 @@ assert p1["next_offset"] == 1000 and len(p3["text"]) == 500 and "next_offset" no
 bridge.db.execute("INSERT INTO documents VALUES ('999@g.us','S1','secret.txt','secret','')"); bridge.db.commit()
 assert "error" in server.get_document("999@g.us", "S1")
 
+# Empty groups.txt (comments only): every group is stored and shown, direct chats are not.
+common.GROUPS_FILE.write_text("# read everything\n")
+assert common.reads_all_groups()
+bridge.allow, bridge.names = common.load_allowlist()
+bridge.every_group = True
+bridge.on_connected(fake_client, None)
+assert bridge.allow == {"111@g.us", "222@g.us", "999@g.us"}, bridge.allow
+live("999@g.us", "X2", "Saturday plan", 1763600000000)
+live("444@g.us", "N1", "Saturday in a group joined while running", 1763600000000)
+live("905551112233@s.whatsapp.net", "DM1", "Saturday direct message", 1763600000000)
+assert {h["group_jid"] for h in server.search_messages("saturday")} == {"999@g.us", "444@g.us"}
+assert server.get_document("999@g.us", "S1")["text"] == "secret"
+common.GROUPS_FILE.unlink()  # missing file is not "read all"
+assert not common.reads_all_groups() and server.list_groups() == []
+
 print("self-check OK")
