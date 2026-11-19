@@ -84,5 +84,5 @@ if __name__ == "__main__":
         resource.setrlimit(resource.RLIMIT_AS, (1024**3, 1024**3))  # 1 GB; not enforced on macOS
     except (ImportError, ValueError, OSError):
         pass
-    sys.stdout.reconfigure(encoding="utf-8")
-    print(extract(sys.argv[1], sys.stdin.buffer.read()), end="")
+    # Raw bytes: text-mode stdout would turn \n into \r\n on Windows.
+    sys.stdout.buffer.write(extract(sys.argv[1], sys.stdin.buffer.read()).encode("utf-8"))
