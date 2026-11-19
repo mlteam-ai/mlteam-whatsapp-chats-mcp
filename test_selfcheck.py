@@ -91,4 +91,18 @@ try:
 except Exception as e:
     assert "readonly" in str(e), e
 
+# Linking check: no file, file without device table, file with a paired device.
+import sqlite3
+session = tmp / "session.db"
+assert not bridge.is_linked(session)
+sqlite3.connect(session).close()
+assert not bridge.is_linked(session)
+with sqlite3.connect(session) as c:
+    c.execute("CREATE TABLE whatsmeow_device (jid TEXT)")
+assert not bridge.is_linked(session)
+with sqlite3.connect(session) as c:
+    c.execute("INSERT INTO whatsmeow_device VALUES ('1@s.whatsapp.net')")
+assert bridge.is_linked(session)
+assert bridge.DEVICE.requireFullSync and bridge.DEVICE.historySyncConfig.fullSyncDaysLimit == 365
+
 print("self-check OK")

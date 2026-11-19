@@ -4,12 +4,17 @@ Links to your account as a device and stores the text of messages from the
 groups listed in groups.txt into data/messages.db. It never sends messages
 and opens no network ports.
 
-    uv run bridge.py --list   # pair (first run) and print your groups
-    uv run bridge.py          # store messages from the groups in groups.txt
+    uv run bridge.py          # link (first run) and store messages from groups.txt
+    uv run bridge.py --list   # after linking: print your groups and their JIDs
+
+WhatsApp sends past history only once, right after linking, so linking happens
+in the normal run where that history gets stored.
 """
 import argparse
+import sqlite3
 import sys
 import threading
+from pathlib import Path
 
 from neonize.client import NewClient
 from neonize.events import ConnectedEv, HistorySyncEv, MessageEv
@@ -18,8 +23,15 @@ from neonize.utils.jid import Jid2String
 
 from common import DATA_DIR, GROUPS_FILE, SESSION_DB, is_allowed, load_allowlist, open_writable
 
-# Shown in WhatsApp > Linked devices, so users can spot and revoke it.
-DEVICE = DeviceProps(os="MLTeam WhatsApp Groups Reader (read-only)", platformType=DeviceProps.SAFARI)
+# Asked for at link time; the phone may send less.
+HISTORY_DAYS = 365
+
+DEVICE = DeviceProps(
+    os="MLTeam WhatsApp Groups Reader (read-only)",  # shown in WhatsApp > Linked devices
+    platformType=DeviceProps.SAFARI,
+    requireFullSync=True,
+    historySyncConfig=DeviceProps.HistorySyncConfig(fullSyncDaysLimit=HISTORY_DAYS),
+)
 
 db = None
 db_lock = threading.Lock()
@@ -47,6 +59,17 @@ def message_text(m) -> str:
             p = getattr(m, field)
             return "[poll] " + " | ".join([p.name, *(o.optionName for o in p.options)])
     return ""
+
+
+def is_linked(session_db: Path) -> bool:
+    """True if the session DB holds a paired device (whatsmeow_device row)."""
+    if not session_db.exists():
+        return False
+    try:
+        with sqlite3.connect(f"file:{session_db}?mode=ro", uri=True) as conn:
+            return conn.execute("SELECT COUNT(*) FROM whatsmeow_device").fetchone()[0] > 0
+    except sqlite3.OperationalError:  # no table yet: pairing never finished
+        return False
 
 
 def remember_group(jid: str, name: str) -> None:
@@ -124,6 +147,10 @@ def main() -> None:
     client = NewClient(str(SESSION_DB), props=DEVICE)
 
     if args.list:
+        if not is_linked(SESSION_DB):
+            sys.exit(f"Not linked yet. Add group names to {GROUPS_FILE.name} and run `uv run bridge.py` "
+                     "first: linking there saves the past history WhatsApp sends once.")
+
         @client.event(ConnectedEv)
         def _(c: NewClient, __: ConnectedEv) -> None:
             for g in c.get_joined_groups():
@@ -137,7 +164,9 @@ def main() -> None:
     allow, names = load_allowlist()
     if not allow and not names:
         sys.exit(f"{GROUPS_FILE.name} lists no groups. Copy groups.example.txt to "
-                 f"{GROUPS_FILE.name}, then add group names or JIDs (see --list).")
+                 f"{GROUPS_FILE.name}, then add the exact names of the groups to read.")
+    if not is_linked(SESSION_DB):
+        print("Linking: after scanning, keep this running. Past history can take several minutes to arrive.")
     db = open_writable()
 
     client.event(ConnectedEv)(on_connected)

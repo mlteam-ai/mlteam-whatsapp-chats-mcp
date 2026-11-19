@@ -29,28 +29,29 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
    cd mlteam-whatsapp-groups-mcp
    ```
 
-2. Link your WhatsApp and list your groups:
-   ```bash
-   uv run bridge.py --list
-   ```
-   Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
-   It appears there as "MLTeam WhatsApp Groups Reader (read-only)".
-
-3. Create your group list:
+2. Create your group list **before linking**:
    ```bash
    cp groups.example.txt groups.txt
    ```
-   Add one group per line: its exact name (`Family Trip`) or its ID (`120363012345678901@g.us`).
-   IDs keep working if the group is renamed.
+   Add the exact name of each group, one per line (for example `Family Trip`).
+   WhatsApp sends past messages only once, at linking, and only groups in this file are kept.
+   So list every group you might want now: groups added later get new messages only.
 
-4. Start the bridge and leave it running:
+3. Start the bridge, link your WhatsApp, and leave it running:
    ```bash
    uv run bridge.py
    ```
-   Right after linking, WhatsApp sends some recent history; older messages are not available.
-   After that, only messages that arrive while the bridge runs are stored.
+   Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
+   It appears there as "MLTeam WhatsApp Groups Reader (read-only)".
+   The bridge asks for up to one year of past messages. Your phone decides how much it sends,
+   and it can take several minutes, so keep the bridge and your phone online meanwhile.
+   After that, it stores new messages while it runs.
 
-5. Add the MCP server to Claude Code (run in the repo folder):
+   Optional, once linked: `uv run bridge.py --list` prints your groups with their IDs
+   (`120363012345678901@g.us`). You can use an ID in `groups.txt` instead of a name;
+   IDs keep working if the group is renamed.
+
+4. Add the MCP server to Claude Code (run in the repo folder):
    ```bash
    claude mcp add whatsapp-groups -- uv --directory "$PWD" run server.py
    ```
@@ -66,11 +67,13 @@ Requires [uv](https://docs.astral.sh/uv/) and macOS, Linux or Windows.
    }
    ```
 
-6. Ask Claude, for example: "What did the Family Trip group decide about flights?"
+5. Ask Claude, for example: "What did the Family Trip group decide about flights?"
 
 ## Changing groups
 
-- **Add a group:** add a line to `groups.txt` and restart the bridge. Earlier messages are not backfilled.
+- **Add a group:** add a line to `groups.txt` and restart the bridge. Its earlier messages are not
+  backfilled. To get them, start over: remove the device in WhatsApp > Linked devices, delete `data/`,
+  and run `uv run bridge.py` again.
 - **Remove a group:** delete its line. Claude stops seeing it immediately. To delete its stored messages:
   ```bash
   sqlite3 data/messages.db "DELETE FROM messages WHERE chat_jid='<group JID>'"
