@@ -67,6 +67,9 @@ Works on Windows, macOS and Linux. On Windows, type the commands in **PowerShell
    ```
    Scan the QR code: WhatsApp on your phone > Settings > Linked devices > Link a device.
    It appears there as "MLTeam WhatsApp Chats Reader (read-only)".
+   If your phone cannot read the QR code, give the terminal a dark background and run `whatsapp-chats`
+   again: on a light background the code shows with its colors reversed. On macOS Terminal, choose
+   Settings > Profiles > "Pro".
    The bridge asks for up to one year of past messages. Your phone decides how much it sends,
    and it can take several minutes, so keep the bridge and your phone online meanwhile.
    After that, it stores new messages whenever it runs. Run `whatsapp-chats` again after a restart.
