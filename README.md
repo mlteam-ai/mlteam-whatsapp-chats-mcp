@@ -50,7 +50,7 @@ Works on Windows, macOS and Linux. On Windows, type the commands in **PowerShell
 
 2. Install this tool:
    ```bash
-   uv tool install git+https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp
+   uv tool install https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp/archive/refs/heads/main.zip
    ```
 
 3. Optional, **before linking**: choose which chats to read. Skip this to read **all** your chats:
@@ -100,7 +100,7 @@ Works on Windows, macOS and Linux. On Windows, type the commands in **PowerShell
 ## Updating
 
 ```bash
-uv tool install --force --upgrade git+https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp
+uv tool install --force --upgrade --reinstall https://github.com/mlteam-ai/mlteam-whatsapp-chats-mcp/archive/refs/heads/main.zip
 ```
 Then restart the bridge and Claude. This also updates the WhatsApp library, which fixes most
 connection errors such as `Client outdated (405)`.
